@@ -1,0 +1,188 @@
+package com.rk.i18n
+
+import java.util.Locale
+
+/**
+ * Lightweight runtime translation for UI labels that are written inline in Compose code.
+ * Resource-backed strings are translated through values-xx/strings.xml; this table covers
+ * the remaining literals so the whole interface can be localized without touching layout code.
+ */
+object Localization {
+
+    private val russian: Map<String, String> = mapOf(
+        // Terminal / sessions
+        "New" to "Новый",
+        "New session" to "Новая сессия",
+        "Sessions" to "Сессии",
+        "Customize" to "Настроить",
+        "Liquid glass terminal" to "Терминал с жидким стеклом",
+        "Run script?" to "Запустить скрипт?",
+        "Session type" to "Тип сессии",
+        "Run" to "Запустить",
+        "Terminal" to "Терминал",
+
+        // Dialogs
+        "New Custom Session" to "Новая сессия",
+        "Session name" to "Имя сессии",
+        "Shell script path" to "Путь к shell-скрипту",
+        "Save" to "Сохранить",
+        "Cancel" to "Отмена",
+        "Delete" to "Удалить",
+        "Deleting…" to "Удаление…",
+        "Reinstall root filesystem" to "Переустановить систему",
+        "Deletes the installed Linux system and downloads it again" to "Удаляет установленный Linux и загружает его заново",
+        "All files inside the Linux system will be deleted. This cannot be undone." to "Все файлы внутри Linux будут удалены. Отменить это нельзя.",
+        "Apply" to "Применить",
+        "Preview" to "Предпросмотр",
+        "HEX" to "HEX",
+        "Hue" to "Оттенок",
+        "Saturation" to "Насыщенность",
+        "Brightness" to "Яркость",
+        "Liquid glass" to "Жидкое стекло",
+
+        // Setup
+        "Root Access Detected" to "Обнаружен root-доступ",
+        "Root access was found. Run the terminal with chroot (faster, requires root for every session) or proot (no root required, slightly slower)? You can change this later in Settings." to
+            "Обнаружен root-доступ. Запускать терминал через chroot (быстрее, root нужен для каждой сессии) или proot (без root, немного медленнее)? Это можно изменить позже в настройках.",
+        "Chroot" to "Chroot",
+        "Proot" to "Proot",
+        "Checking root access..." to "Проверка root-доступа…",
+        "Setup Failed:" to "Ошибка установки:",
+        "Downloading root filesystem..." to "Загрузка корневой файловой системы…",
+        "Extracting root filesystem..." to "Распаковка корневой файловой системы…",
+        "Not enough free space for the root filesystem" to "Недостаточно свободного места для корневой файловой системы",
+        "The root filesystem could not be extracted" to "Не удалось распаковать корневую файловую систему",
+        "Choose distribution" to "Выбор дистрибутива",
+        "Alpine Linux" to "Alpine Linux",
+        "Arch Linux ARM" to "Arch Linux ARM",
+        "Small and fast (bundled)" to "Небольшой и быстрый (в комплекте)",
+        "Full Arch Linux, downloaded once (~830 MB)" to "Полноценный Arch Linux, загружается один раз (~830 МБ)",
+        "Install" to "Установить",
+        "Installing" to "Установка",
+        "Network Error" to "Ошибка сети",
+
+        // Settings
+        "Execution Mode" to "Режим выполнения",
+        "Login Shell" to "Командная оболочка",
+        "Distro default" to "По умолчанию в дистрибутиве",
+        "ash on Alpine, bash on Arch" to "ash в Alpine, bash в Arch",
+        "/bin/bash (runs apk add bash if missing)" to "/bin/bash (при отсутствии выполнит apk add bash)",
+        "/bin/sh" to "/bin/sh",
+        "/bin/ash" to "/bin/ash",
+        "ash" to "ash",
+        "bash" to "bash",
+        "sh" to "sh",
+        "Custom Sessions" to "Пользовательские сессии",
+        "Add Custom Session" to "Добавить сессию",
+        "Liquid glass, colours, wallpaper, terminal background and keyboard" to
+            "Жидкое стекло, цвета, обои, фон терминала и клавиатура",
+        "About" to "О приложении",
+        "Material 3 liquid glass terminal" to "Терминал Material 3 liquid glass",
+
+        // Updates
+        "Updates" to "Обновления",
+        "Check for updates" to "Проверить обновления",
+        "Checking for updates…" to "Проверка обновлений…",
+        "Downloading update…" to "Загрузка обновления…",
+        "Latest version installed" to "Установлена последняя версия",
+        "Update available:" to "Доступно обновление:",
+        "Current version:" to "Текущая версия:",
+        "GitHub repository" to "Репозиторий GitHub",
+        "Could not check for updates" to "Не удалось проверить обновления",
+        "Update failed" to "Не удалось обновить",
+        "You are up to date" to "Обновления не нужны",
+        "Retry" to "Повторить",
+        "Downloading…" to "Загрузка…",
+        "Download and install" to "Скачать и установить",
+        "GitHub" to "GitHub",
+        "Later" to "Позже",
+        "This release has no APK attached. Open the release page to download it manually." to
+            "В этом релизе нет APK. Откройте страницу релиза и скачайте файл вручную.",
+        "Rootless Linux" to "Linux без root",
+        "Alpine, Android and custom sessions via proot or chroot" to
+            "Alpine, Arch, Android и свои сессии через proot или chroot",
+        "Liquid glass · Material 3 · rootless Linux" to "Liquid glass · Material 3 · Linux без root",
+        "Language" to "Язык",
+        "System default" to "Как в системе",
+        "English" to "Английский",
+        "Russian" to "Русский",
+        "Distribution" to "Дистрибутив",
+        "Installed distribution" to "Установленный дистрибутив",
+        "Terminal behaviour" to "Поведение терминала",
+        "Keep screen on" to "Не выключать экран",
+        "Keep screen on while the terminal is open" to "Держать экран включённым при открытом терминале",
+        "Reduce motion" to "Меньше анимации",
+        "Disable the animated liquid background" to "Отключить анимированный жидкий фон",
+        "Reset appearance" to "Сбросить оформление",
+        "Reset appearance?" to "Сбросить оформление?",
+        "Restore the default liquid glass look and terminal colours" to
+            "Вернуть стандартный вид liquid glass и цвета терминала",
+        "Your wallpaper and font files are kept. Every appearance option returns to its default value." to
+            "Обои и файлы шрифтов сохранятся. Все параметры оформления вернутся к значениям по умолчанию.",
+        "Reset" to "Сбросить",
+
+        // Customization
+        "Glass" to "Стекло",
+        "Interface" to "Интерфейс",
+        "App background" to "Фон приложения",
+        "App background colour" to "Цвет фона приложения",
+        "Accent colour" to "Акцентный цвет",
+        "Custom accent colour" to "Свой акцентный цвет",
+        "Override the palette with your own colour" to "Заменить палитру своим цветом",
+        "Used by buttons, highlights and the liquid background" to
+            "Используется для кнопок, выделений и жидкого фона",
+        "Background style" to "Стиль фона",
+        "Background colour" to "Цвет фона",
+        "Solid colour behind every screen" to "Сплошной цвет на всех экранах",
+        "Wallpaper" to "Обои",
+        "Remove wallpaper" to "Удалить обои",
+        "Wallpaper blur" to "Размытие обоев",
+        "Wallpaper dim" to "Затемнение обоев",
+        "Wallpaper alpha" to "Прозрачность обоев",
+        "Liquid speed" to "Скорость жидкости",
+        "Liquid intensity" to "Интенсивность жидкости",
+        "Translucent, rounded surfaces across the app" to
+            "Полупрозрачные скруглённые панели по всему приложению",
+        "Glass opacity" to "Прозрачность стекла",
+        "Corner radius" to "Радиус углов",
+        "Rim brightness" to "Яркость канта",
+        "Terminal background" to "Фон терминала",
+        "Terminal padding" to "Отступы терминала",
+        "Text colour" to "Цвет текста",
+        "Terminal text" to "Текст терминала",
+        "Terminal text colour" to "Цвет текста терминала",
+        "Custom text colour" to "Свой цвет текста",
+        "Foreground used by the terminal" to "Цвет текста в терминале",
+        "Cursor colour" to "Цвет курсора",
+        "Blinking cursor and selection handles" to "Мигающий курсор и маркеры выделения",
+        "Remove image" to "Удалить изображение",
+        "Dim" to "Затемнение",
+        "Terminal colour" to "Цвет терминала",
+        "Solid colour behind the terminal" to "Сплошной цвет под терминалом",
+        "Opacity" to "Непрозрачность",
+        "Gradient dim" to "Затемнение градиента",
+        "Liquid glass studio" to "Студия liquid glass",
+        "Make MakTerm truly yours — colours, glass, wallpaper and terminal." to
+            "Сделайте MakTerm своим — цвета, стекло, обои и терминал.",
+        "ANSI palette" to "Палитра ANSI",
+        "Layout JSON" to "JSON раскладки",
+        "delete" to "удалить",
+
+        // Misc
+        "Please wait..." to "Подождите…",
+        "Could not load image" to "Не удалось загрузить изображение",
+        "Failed to load font" to "Не удалось загрузить шрифт",
+        "OK" to "ОК",
+        "Notification for Terminal Service" to "Уведомление службы терминала",
+    )
+
+    fun languageTag(): String = Locale.getDefault().language
+
+    fun isRussian(): Boolean = languageTag() == "ru"
+
+    /** Returns the localized variant of [text] for the current locale. */
+    fun translate(text: String): String = if (isRussian()) russian[text] ?: text else text
+}
+
+/** Short helper used across Compose screens. */
+fun t(text: String): String = Localization.translate(text)
