@@ -62,9 +62,28 @@ private fun isRootfsExtracted(rootfsDir: File): Boolean {
         rootfsDir.child("usr/bin/pacman").exists()
 }
 
-private fun archDownloadUrl(): String = when (currentAbi()) {
-    "arm64-v8a" -> "https://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
-    "armeabi-v7a" -> "https://archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz"
+/**
+ * Mirrors are tried in order. The official host redirects to plain HTTP and its
+ * HTTP endpoint currently answers 502, so a TLS mirror that actually serves the
+ * tarball comes first; the official URL stays as a last resort.
+ */
+private fun archDownloadUrls(): List<String> = when (currentAbi()) {
+    "arm64-v8a" -> listOf(
+        "https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/os/ArchLinuxARM-aarch64-latest.tar.gz",
+        "https://mirrors.bfsu.edu.cn/archlinuxarm/os/ArchLinuxARM-aarch64-latest.tar.gz",
+        "https://mirrors.nju.edu.cn/archlinuxarm/os/ArchLinuxARM-aarch64-latest.tar.gz",
+        "https://mirrors.sjtug.sjtu.edu.cn/archlinuxarm/os/ArchLinuxARM-aarch64-latest.tar.gz",
+        "http://mirror.archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz",
+        "https://archlinuxarm.org/os/ArchLinuxARM-aarch64-latest.tar.gz"
+    )
+    "armeabi-v7a" -> listOf(
+        "https://mirrors.tuna.tsinghua.edu.cn/archlinuxarm/os/ArchLinuxARM-armv7-latest.tar.gz",
+        "https://mirrors.bfsu.edu.cn/archlinuxarm/os/ArchLinuxARM-armv7-latest.tar.gz",
+        "https://mirrors.nju.edu.cn/archlinuxarm/os/ArchLinuxARM-armv7-latest.tar.gz",
+        "https://mirrors.sjtug.sjtu.edu.cn/archlinuxarm/os/ArchLinuxARM-armv7-latest.tar.gz",
+        "http://mirror.archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz",
+        "https://archlinuxarm.org/os/ArchLinuxARM-armv7-latest.tar.gz"
+    )
     else -> throw RuntimeException("Arch Linux ARM is not available for ${currentAbi()}")
 }
 
@@ -296,9 +315,22 @@ fun SetupScreen(
                     if (!outputFile.exists() || outputFile.length() < minArchiveSize) {
                         outputFile.delete()
                         if (isArch) {
-                            downloadRootfs(archDownloadUrl(), outputFile) { percent ->
-                                withContext(Dispatchers.Main) { downloadProgress = percent }
+                            var lastError: Exception? = null
+                            for (mirror in archDownloadUrls()) {
+                                try {
+                                    downloadRootfs(mirror, outputFile) { percent ->
+                                        withContext(Dispatchers.Main) { downloadProgress = percent }
+                                    }
+                                    lastError = null
+                                    break
+                                } catch (e: Exception) {
+                                    // Keep the mirror host in the message: the
+                                    // setup screen shows it when every mirror fails.
+                                    lastError = IOException("${URL(mirror).host}: ${e.message}", e)
+                                    runCatching { outputFile.delete() }
+                                }
                             }
+                            if (lastError != null) throw lastError
                         } else {
                             val alpineArch = when (currentAbi()) {
                                 "arm64-v8a" -> "aarch64"
