@@ -31,6 +31,10 @@ fun TerminalViewLayout(
 ) {
     AppearanceState.revision
     val terminalPadding = Settings.terminal_padding.dp
+    // Tracks what was already pushed into the Android view. Re-applying the
+    // font, typeface and colour palette on every recomposition invalidates the
+    // whole terminal and makes typing feel laggy.
+    val appliedStyle = remember { AppliedTerminalStyle() }
 
     Column(modifier = modifier) {
         AndroidView(
@@ -73,6 +77,7 @@ fun TerminalViewLayout(
                         requestFocus()
                         isFocusableInTouchMode = true
                         TerminalUtils.applyColors(this)
+                        appliedStyle.revision = AppearanceState.revision
                     }
                 }
             },
@@ -81,9 +86,19 @@ fun TerminalViewLayout(
                 .weight(1f)
                 .padding(horizontal = terminalPadding, vertical = terminalPadding * 0.5f),
             update = { view ->
-                view.setTextSize(dpToPx(Settings.terminal_font_size.toFloat(), view.context))
-                view.setTypeface(TerminalUtils.typeface)
-                TerminalUtils.applyColors(view)
+                val textSize = dpToPx(Settings.terminal_font_size.toFloat(), view.context)
+                if (appliedStyle.textSize != textSize) {
+                    view.setTextSize(textSize)
+                    appliedStyle.textSize = textSize
+                }
+                if (appliedStyle.typeface !== TerminalUtils.typeface) {
+                    view.setTypeface(TerminalUtils.typeface)
+                    appliedStyle.typeface = TerminalUtils.typeface
+                }
+                if (appliedStyle.revision != AppearanceState.revision) {
+                    TerminalUtils.applyColors(view)
+                    appliedStyle.revision = AppearanceState.revision
+                }
             }
         )
 
@@ -91,6 +106,12 @@ fun TerminalViewLayout(
             VirtualKeysPager(viewModel)
         }
     }
+}
+
+private class AppliedTerminalStyle {
+    var textSize: Int = -1
+    var typeface: android.graphics.Typeface? = null
+    var revision: Int = -1
 }
 
 @Composable

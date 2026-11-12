@@ -39,6 +39,20 @@ object Settings {
         get() = Preference.getBoolean(key = "github", default = true)
         set(value) = Preference.setBoolean(key = "github",value)
 
+    // Built-in HTTP file server ("admin panel").
+    var server_port
+        get() = Preference.getInt(key = "server_port", default = 8080)
+        set(value) = Preference.setInt(key = "server_port", value)
+    var server_root
+        get() = Preference.getString(key = "server_root", default = "/sdcard")
+        set(value) = Preference.setString(key = "server_root", value)
+    var server_auth
+        get() = Preference.getBoolean(key = "server_auth", default = false)
+        set(value) = Preference.setBoolean(key = "server_auth", value)
+    var server_password
+        get() = Preference.getString(key = "server_password", default = "")
+        set(value) = Preference.setString(key = "server_password", value)
+
 
     var follow_system_theme
         get() = Preference.getBoolean(key = "follow_system_theme", default = true)

@@ -1,7 +1,11 @@
 package com.rk.terminal.ui.screens.settings
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.os.Build
+import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -19,8 +23,14 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -30,6 +40,10 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
 import androidx.core.net.toUri
 import androidx.navigation.NavController
@@ -41,6 +55,7 @@ import com.rk.components.compose.preferences.base.PreferenceTemplate
 import com.rk.libcommons.child
 import com.rk.libcommons.localDir
 import com.rk.resources.strings
+import com.rk.server.FileServer
 import com.rk.settings.Settings
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.components.SettingsToggle
@@ -50,6 +65,7 @@ import com.rk.terminal.ui.screens.terminal.ExecMode
 import com.rk.terminal.ui.screens.terminal.Rootfs
 import com.rk.i18n.t
 import com.rk.update.GitHubUpdater
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -132,6 +148,11 @@ fun Settings(
     var updateRelease by remember { mutableStateOf<GitHubUpdater.Release?>(null) }
     var updateError by remember { mutableStateOf<String?>(null) }
     var updateUpToDate by remember { mutableStateOf(false) }
+    var showServerPort by remember { mutableStateOf(false) }
+    var showServerRoot by remember { mutableStateOf(false) }
+    var showServerPassword by remember { mutableStateOf(false) }
+    var serverAuth by remember { mutableStateOf(Settings.server_auth) }
+    var serverError by remember { mutableStateOf<String?>(null) }
     val currentVersion = remember { GitHubUpdater.currentVersion(context) }
     val displayVersion = currentVersion.substringBefore('-')
     val settingsScope = rememberCoroutineScope()
@@ -422,6 +443,140 @@ fun Settings(
             )
         }
 
+        PreferenceGroup(heading = t("Server")) {
+            val running = FileServer.running
+            val lanUrl = if (running) FileServer.lanUrl() else null
+            SettingsCard(
+                title = { Text(if (running) t("Stop server") else t("Start server")) },
+                description = {
+                    Text(
+                        when {
+                            running && lanUrl != null -> lanUrl
+                            running -> t("Not connected to Wi-Fi")
+                            else -> t("Share files from your phone over Wi-Fi")
+                        }
+                    )
+                },
+                startWidget = {
+                    Icon(
+                        imageVector = if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                },
+                onClick = {
+                    if (running) {
+                        FileServer.stop()
+                    } else {
+                        serverError = FileServer.start()
+                    }
+                }
+            )
+            if (running) {
+                SettingsCard(
+                    title = { Text(t("Open in browser")) },
+                    description = { Text(lanUrl ?: t("Not connected to Wi-Fi")) },
+                    isEnabled = lanUrl != null,
+                    startWidget = {
+                        Icon(
+                            imageVector = Icons.Default.OpenInNew,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    },
+                    onClick = {
+                        if (lanUrl != null) {
+                            runCatching {
+                                context.startActivity(Intent(Intent.ACTION_VIEW, lanUrl.toUri()))
+                            }
+                        }
+                    }
+                )
+                SettingsCard(
+                    title = { Text(t("Copy link")) },
+                    description = { Text("${t("Requests served")}: ${FileServer.servedRequests}") },
+                    isEnabled = lanUrl != null,
+                    startWidget = {
+                        Icon(
+                            imageVector = Icons.Default.ContentCopy,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    },
+                    onClick = {
+                        if (lanUrl != null) {
+                            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                            clipboard.setPrimaryClip(ClipData.newPlainText("MakTerm", lanUrl))
+                            Toast.makeText(context, t("Link copied"), Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                )
+            }
+            SettingsCard(
+                title = { Text(t("Port")) },
+                description = {
+                    Text(
+                        if (running) "${Settings.server_port} · ${t("Stop the server to change this")}"
+                        else "${Settings.server_port}"
+                    )
+                },
+                isEnabled = !running,
+                onClick = { showServerPort = true }
+            )
+            SettingsCard(
+                title = { Text(t("Shared folder")) },
+                description = {
+                    Text(
+                        if (running) "${Settings.server_root} · ${t("Stop the server to change this")}"
+                        else Settings.server_root
+                    )
+                },
+                isEnabled = !running,
+                startWidget = {
+                    Icon(
+                        imageVector = Icons.Outlined.Folder,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                },
+                onClick = { showServerRoot = true }
+            )
+            SettingsToggle(
+                label = t("Require password"),
+                description = t("Protect the file server with a password"),
+                showSwitch = true,
+                default = Settings.server_auth,
+                sideEffect = {
+                    Settings.server_auth = it
+                    serverAuth = it
+                }
+            )
+            if (serverAuth) {
+                SettingsCard(
+                    title = { Text(t("Password")) },
+                    description = {
+                        Text(
+                            if (Settings.server_password.isBlank()) t("No password set")
+                            else "•••••••• · ${t("Login")}: admin"
+                        )
+                    },
+                    startWidget = {
+                        Icon(
+                            imageVector = Icons.Outlined.Lock,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    },
+                    onClick = { showServerPassword = true }
+                )
+            }
+        }
+
         PreferenceGroup(heading = t("Updates")) {
             SettingsCard(
                 title = { Text(t("Check for updates")) },
@@ -615,6 +770,76 @@ fun Settings(
         )
     }
 
+    if (showServerPort) {
+        ServerFieldDialog(
+            title = t("Port"),
+            initialValue = Settings.server_port.toString(),
+            label = t("Port"),
+            helper = t("Use a port from 1024 to 65535"),
+            numeric = true,
+            validator = { value ->
+                val number = value.trim().toIntOrNull()
+                if (number == null || number !in FileServer.MIN_PORT..FileServer.MAX_PORT) {
+                    t("Use a port from 1024 to 65535")
+                } else null
+            },
+            onDismiss = { showServerPort = false },
+            onSave = { value ->
+                Settings.server_port = value.trim().toInt()
+                showServerPort = false
+            }
+        )
+    }
+
+    if (showServerRoot) {
+        ServerFieldDialog(
+            title = t("Shared folder"),
+            initialValue = Settings.server_root,
+            label = t("Shared folder path"),
+            helper = t("Absolute path, for example /sdcard"),
+            validator = { value ->
+                val path = value.trim()
+                when {
+                    path.isEmpty() -> t("Enter a folder path")
+                    !File(path).isDirectory -> t("Folder not found")
+                    !File(path).canRead() -> t("Folder is not readable")
+                    else -> null
+                }
+            },
+            onDismiss = { showServerRoot = false },
+            onSave = { value ->
+                Settings.server_root = value.trim()
+                showServerRoot = false
+            }
+        )
+    }
+
+    if (showServerPassword) {
+        ServerFieldDialog(
+            title = t("Password"),
+            initialValue = Settings.server_password,
+            label = t("Password"),
+            helper = t("Login: admin. Leave empty to disable protection."),
+            password = true,
+            onDismiss = { showServerPassword = false },
+            onSave = { value ->
+                Settings.server_password = value
+                showServerPassword = false
+            }
+        )
+    }
+
+    serverError?.let { message ->
+        AlertDialog(
+            onDismissRequest = { serverError = null },
+            title = { Text(t("Server error")) },
+            text = { Text(message) },
+            confirmButton = {
+                TextButton(onClick = { serverError = null }) { Text(t("OK")) }
+            }
+        )
+    }
+
     if (showAddCustomSession) {
         CustomSessionDialog(
             onDismiss = { showAddCustomSession = false },
@@ -690,6 +915,56 @@ private fun LoginShellOption(title: String, description: String, mode: Int, curr
             )
         },
         onClick = { onSelect(mode) }
+    )
+}
+
+@Composable
+private fun ServerFieldDialog(
+    title: String,
+    initialValue: String,
+    label: String,
+    helper: String? = null,
+    numeric: Boolean = false,
+    password: Boolean = false,
+    validator: (String) -> String? = { null },
+    onDismiss: () -> Unit,
+    onSave: (String) -> Unit
+) {
+    var value by remember { mutableStateOf(initialValue) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(title) },
+        text = {
+            OutlinedTextField(
+                value = value,
+                onValueChange = {
+                    value = it
+                    error = null
+                },
+                label = { Text(label) },
+                singleLine = true,
+                isError = error != null,
+                visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
+                keyboardOptions = KeyboardOptions(
+                    keyboardType = if (numeric) KeyboardType.Number else KeyboardType.Text
+                ),
+                supportingText = {
+                    val hint = error ?: helper
+                    if (hint != null) Text(hint)
+                }
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val problem = validator(value)
+                if (problem != null) error = problem else onSave(value)
+            }) { Text(t("Save")) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
+        }
     )
 }
 

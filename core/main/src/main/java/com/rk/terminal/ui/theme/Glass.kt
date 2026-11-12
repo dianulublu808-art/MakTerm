@@ -1,28 +1,27 @@
 package com.rk.terminal.ui.theme
 
 import android.graphics.BitmapFactory
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
-import androidx.compose.animation.core.animateFloat
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.ime
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -52,6 +51,44 @@ object AppearanceState {
     fun refresh() {
         revision++
     }
+}
+
+/**
+ * Slow, throttled phase for the liquid backgrounds.
+ *
+ * The gradients move over tens of seconds, so redrawing them at the display
+ * refresh rate only burns CPU/GPU and makes typing in the terminal feel laggy.
+ * 20 fps is visually identical here, and the animation is frozen while the
+ * keyboard is open (typing) or when the user enabled "reduce motion".
+ */
+@Composable
+private fun rememberGlassPhase(periodMillis: Int, animated: Boolean, fps: Int = 20): Float {
+    var phase by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(periodMillis, animated, fps) {
+        if (!animated) return@LaunchedEffect
+        val frameNanos = 1_000_000_000L / fps
+        val periodNanos = periodMillis * 1_000_000f
+        val base = phase
+        var startNanos = 0L
+        var lastUpdate = 0L
+        while (true) {
+            withFrameNanos { now ->
+                if (startNanos == 0L) startNanos = now
+                if (now - lastUpdate >= frameNanos) {
+                    lastUpdate = now
+                    val elapsed = ((now - startNanos) / periodNanos) * (2f * PI).toFloat()
+                    phase = (base + elapsed) % (2f * PI).toFloat()
+                }
+            }
+        }
+    }
+    return phase
+}
+
+@Composable
+private fun isImeVisible(): Boolean {
+    val density = LocalDensity.current
+    return WindowInsets.ime.getBottom(density) > 0
 }
 
 /** Full-screen background used by every screen of the app. */
@@ -147,19 +184,10 @@ fun LiquidBackground(modifier: Modifier = Modifier) {
     val intensity = Settings.liquid_intensity.coerceIn(0f, 1f)
     val dark = scheme.background.luminance() < 0.5f
 
-    val transition = rememberInfiniteTransition(label = "liquid-background")
-    val animated = !Settings.reduce_motion
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = if (animated) (2f * PI).toFloat() else 0f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = (22000f / speed).toInt().coerceAtLeast(5000),
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "liquid-phase"
+    val animated = !Settings.reduce_motion && !isImeVisible()
+    val phase = rememberGlassPhase(
+        periodMillis = (22000f / speed).toInt().coerceAtLeast(5000),
+        animated = animated
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
@@ -236,18 +264,10 @@ fun TerminalGradientBackground(modifier: Modifier = Modifier) {
     val revision = AppearanceState.revision
     val scheme = MaterialTheme.colorScheme
     val speed = Settings.liquid_speed.coerceIn(0.15f, 3f)
-    val transition = rememberInfiniteTransition(label = "terminal-gradient")
-    val phase by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = (2f * PI).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(
-                durationMillis = (26000f / speed).toInt().coerceAtLeast(6000),
-                easing = LinearEasing
-            ),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "terminal-phase"
+    val animated = !Settings.reduce_motion && !isImeVisible()
+    val phase = rememberGlassPhase(
+        periodMillis = (26000f / speed).toInt().coerceAtLeast(6000),
+        animated = animated
     )
 
     Canvas(modifier = modifier.fillMaxSize()) {
