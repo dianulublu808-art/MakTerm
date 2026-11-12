@@ -106,6 +106,52 @@ object Localization {
         "Login: admin. Leave empty to disable protection." to "Логин: admin. Оставьте пустым, чтобы отключить защиту.",
         "Server error" to "Ошибка сервера",
 
+        // System dashboard / hosting
+        "System status" to "Состояние системы",
+        "Disk" to "Диск",
+        "Battery" to "Батарея",
+        "Charging" to "Зарядка",
+        "Uptime" to "Время работы",
+        "Hosting" to "Хостинг",
+        "Add process" to "Добавить процесс",
+        "Run a Telegram bot, a script or any background command" to
+            "Запустить Telegram-бота, скрипт или любую фоновую команду",
+        "Running" to "Работает",
+        "Stopped" to "Остановлен",
+        "Auto-restart" to "Автозапуск",
+        "No processes yet" to "Пока нет процессов",
+        "Add a command above to host it in the background" to
+            "Добавьте команду выше, чтобы держать её в фоне",
+        "Linux tools" to "Инструменты Linux",
+        "Install into the Linux system" to "Установить в систему Linux",
+        "Backup Linux system" to "Резервная копия Linux",
+        "Create a tar.gz archive in /sdcard/Download" to
+            "Создать архив tar.gz в /sdcard/Download",
+        "New process" to "Новый процесс",
+        "Edit process" to "Изменить процесс",
+        "Name" to "Название",
+        "Command" to "Команда",
+        "Working directory" to "Рабочая папка",
+        "Port (optional)" to "Порт (необязательно)",
+        "Run in Linux" to "Запускать в Linux",
+        "Uncheck to run in the Android shell" to
+            "Снимите галочку, чтобы запускать в оболочке Android",
+        "Auto-restart on crash" to "Перезапуск при сбое",
+        "Restart up to 5 times after an unexpected exit" to
+            "До 5 перезапусков после неожиданного завершения",
+        "Enter a name" to "Введите название",
+        "Enter a command" to "Введите команду",
+        "Logs" to "Логи",
+        "No logs yet" to "Логов пока нет",
+        "Clear" to "Очистить",
+        "Close" to "Закрыть",
+        "Edit" to "Изменить",
+        "Delete process?" to "Удалить процесс?",
+        "The process will be stopped and removed from the list." to
+            "Процесс будет остановлен и удалён из списка.",
+        "Task" to "Задача",
+        "Starting…" to "Запуск…",
+
         // Updates
         "Updates" to "Обновления",
         "Check for updates" to "Проверить обновления",

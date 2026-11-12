@@ -8,6 +8,8 @@ import android.os.Build
 import android.widget.Toast
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
@@ -17,9 +19,12 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Add
@@ -28,7 +33,9 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.outlined.Article
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material3.*
@@ -39,12 +46,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.core.net.toUri
 import androidx.navigation.NavController
 import com.rk.components.compose.glass.GlassSurface
@@ -56,6 +65,13 @@ import com.rk.libcommons.child
 import com.rk.libcommons.localDir
 import com.rk.resources.strings
 import com.rk.server.FileServer
+import com.rk.server.HostService
+import com.rk.server.HostedProcess
+import com.rk.server.HostedProcessManager
+import com.rk.server.HostedProcesses
+import com.rk.server.ProcessLauncher
+import com.rk.server.SystemStats
+import com.rk.server.TaskRunner
 import com.rk.settings.Settings
 import com.rk.terminal.ui.activities.terminal.MainActivity
 import com.rk.terminal.ui.components.SettingsToggle
@@ -67,8 +83,8 @@ import com.rk.i18n.t
 import com.rk.update.GitHubUpdater
 import java.io.File
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withContext
 
 @OptIn(ExperimentalFoundationApi::class)
@@ -153,9 +169,23 @@ fun Settings(
     var showServerPassword by remember { mutableStateOf(false) }
     var serverAuth by remember { mutableStateOf(Settings.server_auth) }
     var serverError by remember { mutableStateOf<String?>(null) }
+    var stats by remember { mutableStateOf(SystemStats.snapshot(context)) }
+    var hostedProcesses by remember { mutableStateOf(HostedProcesses.getAll()) }
+    var showHostEditor by remember { mutableStateOf(false) }
+    var editingHost by remember { mutableStateOf<HostedProcess?>(null) }
+    var showHostLog by remember { mutableStateOf<HostedProcess?>(null) }
+    var deleteHost by remember { mutableStateOf<HostedProcess?>(null) }
+    var showTaskLog by remember { mutableStateOf(false) }
     val currentVersion = remember { GitHubUpdater.currentVersion(context) }
     val displayVersion = currentVersion.substringBefore('-')
     val settingsScope = rememberCoroutineScope()
+
+    LaunchedEffect(Unit) {
+        while (true) {
+            stats = SystemStats.snapshot(context)
+            delay(2000)
+        }
+    }
 
     fun checkForUpdates() {
         if (checkingUpdate || downloadingUpdate) return
@@ -516,6 +546,24 @@ fun Settings(
                 )
             }
             SettingsCard(
+                title = { Text(t("System status")) },
+                description = {
+                    Text(
+                        buildString {
+                            append("CPU: ${stats.cpuLoad}\n")
+                            append("RAM: ${ProcessLauncher.sizeLabel(stats.ramUsed)} / ${ProcessLauncher.sizeLabel(stats.ramTotal)}\n")
+                            append("${t("Disk")}: ${ProcessLauncher.sizeLabel(stats.diskUsed)} / ${ProcessLauncher.sizeLabel(stats.diskTotal)}\n")
+                            append("${t("Battery")}: ")
+                            if (stats.batteryPercent >= 0) append("${stats.batteryPercent}%") else append("—")
+                            if (stats.charging) append(" · ${t("Charging")}")
+                            append("\n${t("Uptime")}: ${stats.uptime}")
+                            stats.lanAddress?.let { append("\nIP: $it") }
+                        }
+                    )
+                },
+                onClick = {}
+            )
+            SettingsCard(
                 title = { Text(t("Port")) },
                 description = {
                     Text(
@@ -575,6 +623,124 @@ fun Settings(
                     onClick = { showServerPassword = true }
                 )
             }
+        }
+
+        PreferenceGroup(heading = t("Hosting")) {
+            SettingsCard(
+                title = { Text(t("Add process")) },
+                description = { Text(t("Run a Telegram bot, a script or any background command")) },
+                startWidget = {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(start = 16.dp)
+                    )
+                },
+                onClick = {
+                    editingHost = null
+                    showHostEditor = true
+                }
+            )
+            hostedProcesses.forEach { config ->
+                val runtime = HostedProcessManager.runtime(config.id)
+                val running = runtime?.running == true
+                SettingsCard(
+                    title = { Text(config.name) },
+                    description = {
+                        Text(
+                            buildString {
+                                append(ProcessLauncher.modeLabel(config.linux))
+                                if (config.port > 0) append(":${config.port}")
+                                append(" · ")
+                                append(if (running) t("Running") else t("Stopped"))
+                                if (config.keepAlive) append(" · ${t("Auto-restart")}")
+                            }
+                        )
+                    },
+                    startWidget = {
+                        Icon(
+                            imageVector = if (running) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.padding(start = 16.dp)
+                        )
+                    },
+                    endWidget = {
+                        Row(modifier = Modifier.padding(end = 4.dp)) {
+                            IconButton(onClick = { showHostLog = config }) {
+                                Icon(Icons.Outlined.Article, contentDescription = t("Logs"))
+                            }
+                            IconButton(onClick = {
+                                editingHost = config
+                                showHostEditor = true
+                            }) {
+                                Icon(Icons.Outlined.Edit, contentDescription = t("Edit"))
+                            }
+                            IconButton(onClick = { deleteHost = config }) {
+                                Icon(Icons.Outlined.Delete, contentDescription = t("Delete"))
+                            }
+                        }
+                    },
+                    onClick = {
+                        if (running) {
+                            HostedProcessManager.stop(config.id)
+                        } else {
+                            HostedProcessManager.start(config)
+                            HostService.start(context)
+                        }
+                    }
+                )
+            }
+            if (hostedProcesses.isEmpty()) {
+                SettingsCard(
+                    title = { Text(t("No processes yet")) },
+                    description = { Text(t("Add a command above to host it in the background")) },
+                    onClick = {
+                        editingHost = null
+                        showHostEditor = true
+                    }
+                )
+            }
+        }
+
+        PreferenceGroup(heading = t("Linux tools")) {
+            PackageTool("Python", "python3 py3-pip", "python python-pip") {
+                showTaskLog = true
+                TaskRunner.run(context, t("Installing") + " Python", linuxInstallCommand("python3 py3-pip", "python python-pip"))
+            }
+            PackageTool("Node.js", "nodejs npm", "nodejs npm") {
+                showTaskLog = true
+                TaskRunner.run(context, t("Installing") + " Node.js", linuxInstallCommand("nodejs npm", "nodejs npm"))
+            }
+            PackageTool("Git", "git", "git") {
+                showTaskLog = true
+                TaskRunner.run(context, t("Installing") + " Git", linuxInstallCommand("git", "git"))
+            }
+            PackageTool("OpenSSH", "openssh", "openssh") {
+                showTaskLog = true
+                TaskRunner.run(context, t("Installing") + " OpenSSH", linuxInstallCommand("openssh", "openssh"))
+            }
+            PackageTool("FFmpeg", "ffmpeg", "ffmpeg") {
+                showTaskLog = true
+                TaskRunner.run(context, t("Installing") + " FFmpeg", linuxInstallCommand("ffmpeg", "ffmpeg"))
+            }
+            SettingsCard(
+                title = { Text(t("Backup Linux system")) },
+                description = { Text(t("Create a tar.gz archive in /sdcard/Download")) },
+                onClick = {
+                    val rootfs = context.localDir().child("alpine")
+                    val output = "/sdcard/Download/MakTerm-rootfs-${System.currentTimeMillis()}.tar.gz"
+                    val tar = if (File("/system/bin/tar").exists()) "/system/bin/tar" else "tar"
+                    showTaskLog = true
+                    TaskRunner.run(
+                        context,
+                        t("Backup Linux system"),
+                        "echo 'Архивирую ${rootfs.absolutePath}...'; $tar -czf '$output' -C '${rootfs.absolutePath}' . && echo 'Готово: $output'",
+                        linux = false
+                    )
+                }
+            )
         }
 
         PreferenceGroup(heading = t("Updates")) {
@@ -840,6 +1006,80 @@ fun Settings(
         )
     }
 
+    if (showHostEditor) {
+        HostProcessDialog(
+            initial = editingHost,
+            onDismiss = { showHostEditor = false },
+            onSave = { process ->
+                if (editingHost == null) {
+                    HostedProcesses.add(process)
+                } else {
+                    HostedProcesses.update(process)
+                }
+                hostedProcesses = HostedProcesses.getAll()
+                showHostEditor = false
+            }
+        )
+    }
+
+    showHostLog?.let { process ->
+        HostLogDialog(process = process, onDismiss = { showHostLog = null })
+    }
+
+    deleteHost?.let { process ->
+        AlertDialog(
+            onDismissRequest = { deleteHost = null },
+            title = { Text(t("Delete process?")) },
+            text = { Text(t("The process will be stopped and removed from the list.")) },
+            confirmButton = {
+                TextButton(onClick = {
+                    HostedProcessManager.stop(process.id)
+                    HostedProcesses.remove(process.id)
+                    hostedProcesses = HostedProcesses.getAll()
+                    deleteHost = null
+                }) { Text(t("Delete")) }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteHost = null }) { Text(t("Cancel")) }
+            }
+        )
+    }
+
+    if (showTaskLog) {
+        AlertDialog(
+            onDismissRequest = { if (!TaskRunner.running) showTaskLog = false },
+            title = { Text(TaskRunner.title.ifBlank { t("Task") }) },
+            text = {
+                Column {
+                    if (TaskRunner.running) {
+                        LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
+                    Box(modifier = Modifier.heightIn(max = 360.dp)) {
+                        SelectionContainer {
+                            Text(
+                                TaskRunner.log.takeLast(20_000).ifBlank { t("Starting…") },
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 11.sp
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { showTaskLog = false },
+                    enabled = !TaskRunner.running
+                ) { Text(t("Close")) }
+            },
+            dismissButton = {
+                if (TaskRunner.running) {
+                    TextButton(onClick = { TaskRunner.cancel() }) { Text(t("Cancel")) }
+                }
+            }
+        )
+    }
+
     if (showAddCustomSession) {
         CustomSessionDialog(
             onDismiss = { showAddCustomSession = false },
@@ -915,6 +1155,176 @@ private fun LoginShellOption(title: String, description: String, mode: Int, curr
             )
         },
         onClick = { onSelect(mode) }
+    )
+}
+
+@Composable
+private fun PackageTool(name: String, apkPackages: String, pacmanPackages: String, onClick: () -> Unit) {
+    SettingsCard(
+        title = { Text(name) },
+        description = { Text(t("Install into the Linux system")) },
+        startWidget = {
+            Icon(
+                imageVector = Icons.Default.Add,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.padding(start = 16.dp)
+            )
+        },
+        onClick = onClick
+    )
+}
+
+private fun linuxInstallCommand(apkPackages: String, pacmanPackages: String): String {
+    return "if command -v apk >/dev/null 2>&1; then " +
+        "apk add --no-cache $apkPackages; " +
+        "elif command -v pacman >/dev/null 2>&1; then " +
+        "pacman -Sy --noconfirm --needed $pacmanPackages; " +
+        "else echo 'No apk or pacman found'; exit 1; fi"
+}
+
+@Composable
+private fun HostProcessDialog(
+    initial: HostedProcess?,
+    onDismiss: () -> Unit,
+    onSave: (HostedProcess) -> Unit
+) {
+    var name by remember(initial) { mutableStateOf(initial?.name.orEmpty()) }
+    var command by remember(initial) { mutableStateOf(initial?.command.orEmpty()) }
+    var workDir by remember(initial) { mutableStateOf(initial?.workDir ?: "/sdcard") }
+    var port by remember(initial) { mutableStateOf(initial?.port?.takeIf { it > 0 }?.toString().orEmpty()) }
+    var linux by remember(initial) { mutableStateOf(initial?.linux ?: true) }
+    var keepAlive by remember(initial) { mutableStateOf(initial?.keepAlive ?: false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (initial == null) t("New process") else t("Edit process")) },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it; error = null },
+                    label = { Text(t("Name")) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = command,
+                    onValueChange = { command = it; error = null },
+                    label = { Text(t("Command")) },
+                    minLines = 3,
+                    maxLines = 8,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = workDir,
+                    onValueChange = { workDir = it },
+                    label = { Text(t("Working directory")) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                OutlinedTextField(
+                    value = port,
+                    onValueChange = { value -> port = value.filter { it.isDigit() } },
+                    label = { Text(t("Port (optional)")) },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = linux, onCheckedChange = { linux = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(t("Run in Linux"))
+                        Text(
+                            t("Uncheck to run in the Android shell"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Switch(checked = keepAlive, onCheckedChange = { keepAlive = it })
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Column {
+                        Text(t("Auto-restart on crash"))
+                        Text(
+                            t("Restart up to 5 times after an unexpected exit"),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+                error?.let {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(it, color = MaterialTheme.colorScheme.error)
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                if (name.isBlank()) {
+                    error = t("Enter a name")
+                    return@TextButton
+                }
+                if (command.isBlank()) {
+                    error = t("Enter a command")
+                    return@TextButton
+                }
+                val portValue = port.toIntOrNull() ?: 0
+                if (portValue !in 0..65535) {
+                    error = t("Use a port from 1024 to 65535")
+                    return@TextButton
+                }
+                onSave(
+                    HostedProcess(
+                        id = initial?.id.orEmpty(),
+                        name = name.trim(),
+                        command = command.trim(),
+                        workDir = workDir.trim().ifBlank { "/sdcard" },
+                        linux = linux,
+                        port = portValue,
+                        keepAlive = keepAlive
+                    )
+                )
+            }) { Text(t("Save")) }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(t("Cancel")) }
+        }
+    )
+}
+
+@Composable
+private fun HostLogDialog(process: HostedProcess, onDismiss: () -> Unit) {
+    val runtime = HostedProcessManager.runtime(process.id)
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("${process.name} · ${t("Logs")}") },
+        text = {
+            Box(modifier = Modifier.heightIn(max = 360.dp)) {
+                SelectionContainer {
+                    Text(
+                        runtime?.log?.takeLast(20_000).orEmpty().ifBlank { t("No logs yet") },
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) { Text(t("Close")) }
+        },
+        dismissButton = {
+            TextButton(onClick = { HostedProcessManager.clearLog(process.id) }) {
+                Text(t("Clear"))
+            }
+        }
     )
 }
 

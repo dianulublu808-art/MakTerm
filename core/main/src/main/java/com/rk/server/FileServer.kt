@@ -5,6 +5,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.rk.libcommons.application
 import com.rk.settings.Settings
 import java.io.BufferedOutputStream
 import java.io.BufferedReader
@@ -98,6 +99,8 @@ object FileServer {
             servedRequests = 0
             executor = Executors.newFixedThreadPool(6)
             running = true
+            HostService.start(application!!)
+            HostService.refresh(application!!)
             acceptThread = Thread({ acceptLoop(socket) }, "MakTerm-FileServer").apply {
                 isDaemon = true
                 start()
@@ -127,6 +130,10 @@ object FileServer {
         acceptThread = null
         port = 0
         rootPath = ""
+        HostService.refresh(application!!)
+        if (HostedProcessManager.runtimes.values.none { it.running }) {
+            HostService.stop(application!!)
+        }
     }
 
     private fun acceptLoop(socket: ServerSocket) {
