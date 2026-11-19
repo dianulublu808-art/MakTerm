@@ -27,7 +27,20 @@ jobs:
       - name: Install SDK platform
         run: |
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-            "platforms;android-37" "build-tools;37.0.0" > /dev/null || true
+            "platforms;android-37" "build-tools;37.0.0" \
+            "ndk;29.0.13846066" > /dev/null || true
+
+      - name: Install Rust targets
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android,i686-linux-android
+
+      - name: Build Rust process supervisor
+        run: |
+          if [ -z "${ANDROID_NDK_HOME:-}" ] && [ -d "$ANDROID_HOME/ndk" ]; then
+            export ANDROID_NDK_HOME="$(find "$ANDROID_HOME/ndk" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)"
+          fi
+          bash core/rust/build-android.sh
 
       - name: Build debug APK
         run: |

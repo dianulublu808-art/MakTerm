@@ -9,26 +9,38 @@ import com.rk.terminal.App
 import com.rk.terminal.BuildConfig
 import com.rk.terminal.ui.screens.terminal.ExecMode
 import com.rk.terminal.ui.screens.terminal.Rootfs
+import org.json.JSONArray
+import org.json.JSONObject
 import java.io.File
 import java.util.Locale
 
 /**
- * Builds a process that runs either in the Android shell or inside the
- * installed Linux root filesystem (through the same init-host wrapper used by
- * terminal sessions). Shared by the process host and one-shot tasks.
+ * Builds the command line and environment for a process that runs either in
+ * the Android shell or inside the installed Linux root filesystem (through the
+ * same init-host wrapper used by terminal sessions).
+ *
+ * The actual supervision (spawning, log capture, keep-alive) lives in Rust;
+ * this object only knows Android paths and proot/chroot details.
  */
 object ProcessLauncher {
 
-    fun create(
+    data class LaunchSpec(
+        val program: List<String>,
+        val environment: Map<String, String>,
+        val workDir: String
+    )
+
+    fun buildSpec(
         context: Context,
         command: String,
         linux: Boolean,
         workDir: String,
         id: String
-    ): Process {
+    ): LaunchSpec {
         val wrapped = wrapWorkDir(workDir, command)
         val hostDir = File(context.filesDir, "host").apply { mkdirs() }
-        val args = if (linux) {
+        val program = if (linux) {
+            ensureLinuxScripts(context)
             val initHost = context.localBinDir().child(
                 if (Rootfs.execMode.value == ExecMode.CHROOT) "init-host-chroot" else "init-host"
             )
@@ -40,15 +52,45 @@ object ProcessLauncher {
             script.writeText("#!/bin/sh\n$wrapped\n")
             script.setReadable(true, false)
             script.setExecutable(true, false)
-            arrayOf(initHost.absolutePath, "sh", script.absolutePath)
+            listOf(initHost.absolutePath, "sh", script.absolutePath)
         } else {
-            arrayOf("/system/bin/sh", "-c", wrapped)
+            listOf("/system/bin/sh", "-c", wrapped)
         }
+        return LaunchSpec(program, environment(context, id), hostDir.absolutePath)
+    }
 
-        val builder = ProcessBuilder(*args)
+    /** Serializes a [HostedProcess] for the Rust supervisor. */
+    fun jsonSpec(context: Context, process: HostedProcess): String {
+        val spec = buildSpec(
+            context = context,
+            command = process.command,
+            linux = process.linux,
+            workDir = process.workDir,
+            id = process.id
+        )
+        return JSONObject().apply {
+            put("id", process.id)
+            put("program", JSONArray(spec.program))
+            put("env", JSONObject(spec.environment as Map<*, *>))
+            put("workDir", spec.workDir)
+            put("keepAlive", process.keepAlive)
+            put("maxRestarts", MAX_RESTARTS)
+        }.toString()
+    }
+
+    /** One-shot process used by [TaskRunner]. */
+    fun create(
+        context: Context,
+        command: String,
+        linux: Boolean,
+        workDir: String,
+        id: String
+    ): Process {
+        val spec = buildSpec(context, command, linux, workDir, id)
+        val builder = ProcessBuilder(spec.program)
             .redirectErrorStream(true)
-            .directory(hostDir)
-        builder.environment().putAll(environment(context, id))
+            .directory(File(spec.workDir))
+        builder.environment().putAll(spec.environment)
         return builder.start()
     }
 
@@ -57,6 +99,28 @@ object ProcessLauncher {
         if (dir.isEmpty()) return command
         val escaped = dir.replace("'", "'\\''")
         return "cd '$escaped' 2>/dev/null || true; $command"
+    }
+
+    /**
+     * Hosted processes can be started before the terminal screen is opened for
+     * the first time, so make sure the wrapper scripts exist and match the APK.
+     */
+    private fun ensureLinuxScripts(context: Context) {
+        val bin = context.localBinDir()
+        listOf(
+            "init-host" to "init-host.sh",
+            "init-host-chroot" to "init-host-chroot.sh",
+            "init" to "init.sh"
+        ).forEach { (name, asset) ->
+            runCatching {
+                val text = context.assets.open(asset).bufferedReader().use { it.readText() }
+                val file = bin.child(name)
+                if (!file.exists() || file.readText() != text) {
+                    file.writeText(text)
+                }
+                file.setExecutable(true)
+            }
+        }
     }
 
     private fun environment(context: Context, id: String): Map<String, String> {
@@ -105,4 +169,6 @@ object ProcessLauncher {
         return if (unit == 0) "${bytes} ${units[0]}"
         else String.format(Locale.US, "%.1f %s", value, units[unit])
     }
+
+    private const val MAX_RESTARTS = 5
 }

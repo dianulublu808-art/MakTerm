@@ -2,6 +2,14 @@
 
 Android-терминал (форк ReTerminal, лицензия MIT — файл LICENSE сохранён).
 
+## Что нового в 1.7.0
+- **Ядро хостинга процессов переписано на Rust.** Kotlin/Compose остаётся интерфейсом, а жизненным циклом фоновых процессов управляет нативная библиотека `libmakterm_core.so` через JNI.
+- Rust запускает процесс, читает stdout/stderr, хранит ограниченный лог, останавливает процесс по SIGTERM/SIGKILL и делает автоперезапуск до 5 раз. Kotlin передаёт готовую команду и окружение (Android shell или proot/chroot `init-host`), поэтому поддержка Linux не потерялась.
+- Связь без JNI-колбэков: UI опрашивает компактный JSON-снимок состояния и лог, так что нативные потоки не трогают JVM.
+- Добавлены Rust-тесты на запуск, захват вывода и остановку процесса.
+- CI собирает `libmakterm_core.so` под `arm64-v8a`, `armeabi-v7a`, `x86_64` и `x86`.
+- Версия: `versionCode 18`, `versionName 1.7.0`.
+
 ## Что нового в 1.6.0
 - **Хостинг любых фоновых процессов.** В настройках появился раздел «Хостинг»: добавьте Telegram-бота, скрипт или любую команду, и MakTerm будет держать её запущенной. Процессы работают в фоне через foreground-сервис с уведомлением, поэтому не умирают при сворачивании приложения.
 - Для каждого процесса можно указать название, команду, рабочую папку, порт и режим: внутри Linux (proot/chroot) или в оболочке Android. Есть живой лог, очистка лога и автоперезапуск до 5 раз после сбоя.
@@ -60,6 +68,24 @@ Material 3 + «жидкое стекло», настройка акцента, �
 ./gradlew assembleDebug
 ```
 APK появится в `app/build/outputs/apk/debug/app-debug.apk`.
+
+## Rust-ядро
+`core/rust` — отдельный Cargo-проект (`makterm_core`), который собирается в `libmakterm_core.so`. Исходники лежат в `core/rust/src/lib.rs`, готовые библиотеки — в `core/main/src/main/jniLibs/<abi>/`.
+
+```bash
+# Linux/CI: нужен Android NDK и rustup
+export ANDROID_NDK_HOME="$ANDROID_HOME/ndk/29.0.13846066"
+bash core/rust/build-android.sh
+
+# Termux: собирается только arm64, потому что host triple уже Android
+ABIS=arm64-v8a CLANG=$(command -v clang) AR=$(command -v llvm-ar) \
+  bash core/rust/build-android.sh
+```
+
+Тесты супервизора:
+```bash
+cd core/rust && cargo test --release
+```
 
 ## Замечания по proot
 `libproot.so` запускается из `applicationInfo.nativeLibraryDir`, поэтому рядом должны лежать `libloader.so` (передаётся в `PROOT_LOADER`), а его зависимости (`libtalloc.so`, `libandroid-shmem.so`) — в каталоге из `LD_LIBRARY_PATH` (`local/lib`). Если обновляешь prebuilt-библиотеки proot, не забудь про загрузчик.

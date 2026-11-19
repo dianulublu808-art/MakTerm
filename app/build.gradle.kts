@@ -101,8 +101,8 @@ android {
         applicationId = "com.maksik.term"
         minSdk = 26
         targetSdk = 37
-        versionCode = 17
-        versionName = "1.6.0"
+        versionCode = 18
+        versionName = "1.7.0"
         vectorDrawables {
             useSupportLibrary = true
         }

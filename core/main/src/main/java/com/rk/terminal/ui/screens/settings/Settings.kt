@@ -1302,7 +1302,13 @@ private fun HostProcessDialog(
 
 @Composable
 private fun HostLogDialog(process: HostedProcess, onDismiss: () -> Unit) {
-    val runtime = HostedProcessManager.runtime(process.id)
+    var log by remember(process.id) { mutableStateOf("") }
+    LaunchedEffect(process.id) {
+        while (true) {
+            log = withContext(Dispatchers.IO) { HostedProcessManager.log(process.id) }
+            delay(500)
+        }
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("${process.name} · ${t("Logs")}") },
@@ -1310,7 +1316,7 @@ private fun HostLogDialog(process: HostedProcess, onDismiss: () -> Unit) {
             Box(modifier = Modifier.heightIn(max = 360.dp)) {
                 SelectionContainer {
                     Text(
-                        runtime?.log?.takeLast(20_000).orEmpty().ifBlank { t("No logs yet") },
+                        log.takeLast(20_000).ifBlank { t("No logs yet") },
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp
                     )
@@ -1321,7 +1327,10 @@ private fun HostLogDialog(process: HostedProcess, onDismiss: () -> Unit) {
             TextButton(onClick = onDismiss) { Text(t("Close")) }
         },
         dismissButton = {
-            TextButton(onClick = { HostedProcessManager.clearLog(process.id) }) {
+            TextButton(onClick = {
+                HostedProcessManager.clearLog(process.id)
+                log = ""
+            }) {
                 Text(t("Clear"))
             }
         }

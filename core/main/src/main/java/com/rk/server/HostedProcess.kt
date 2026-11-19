@@ -1,6 +1,8 @@
 package com.rk.server
 
 import android.content.Context
+import android.os.Handler
+import android.os.Looper
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -12,7 +14,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
-import java.util.concurrent.ConcurrentHashMap
 
 data class HostedProcess(
     val id: String,
@@ -87,19 +88,27 @@ object HostedProcesses {
 }
 
 class HostRuntime(val id: String) {
-    var process: Process? = null
     var running by mutableStateOf(false)
     var stopping by mutableStateOf(false)
-    var log by mutableStateOf("")
     var startedAt by mutableLongStateOf(0L)
-    var restarts = 0
+    var restarts by mutableStateOf(0)
+    var exitCode by mutableStateOf<Int?>(null)
 }
 
+/**
+ * Android-side view of the Rust process supervisor.
+ *
+ * All process lifecycle work happens in `libmakterm_core.so`. This object
+ * builds the launch spec, keeps the Compose state in sync by polling a small
+ * JSON snapshot, and drives [HostService] while something is running.
+ */
 object HostedProcessManager {
-    private const val MAX_LOG = 120_000
-    private const val MAX_RESTARTS = 5
+    private const val POLL_INTERVAL_MS = 700L
     val runtimes = mutableStateMapOf<String, HostRuntime>()
-    private val threads = ConcurrentHashMap<String, Thread>()
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    @Volatile
+    private var poller: Thread? = null
 
     fun runtime(id: String): HostRuntime? = runtimes[id]
 
@@ -107,93 +116,112 @@ object HostedProcessManager {
 
     fun start(config: HostedProcess): String? {
         if (config.command.isBlank()) return "Command is empty"
-        val existing = runtimes[config.id]
-        if (existing?.running == true) return null
-        val runtime = existing ?: HostRuntime(config.id).also { runtimes[config.id] = it }
+        if (!RustProcessHost.available) return "Rust core is not loaded"
+
+        val runtime = runtimes.getOrPut(config.id) { HostRuntime(config.id) }
         runtime.stopping = false
+        runtime.exitCode = null
+        val spec = ProcessLauncher.jsonSpec(application!!, config)
+        val error = RustProcessHost.nativeStart(spec)
+        if (error.isNotBlank()) return error
+
+        runtime.running = true
+        runtime.startedAt = System.currentTimeMillis()
         runtime.restarts = 0
-        runtime.log = ""
         HostService.start(application!!)
-        launch(config, runtime)
         HostService.refresh(application!!)
+        ensurePoller()
         return null
     }
 
     fun stop(id: String) {
-        val runtime = runtimes[id] ?: return
-        runtime.stopping = true
-        runtime.running = false
-        runtime.process?.let { process ->
-            runCatching { process.destroy() }
-            Thread {
-                Thread.sleep(1500)
-                if (runCatching { process.isAlive }.getOrDefault(false)) {
-                    runCatching { process.destroyForcibly() }
-                }
-            }.apply { isDaemon = true; start() }
+        RustProcessHost.nativeStop(id)
+        runtimes[id]?.let {
+            it.stopping = true
+            it.running = false
         }
         HostService.refresh(application!!)
         maybeStopService()
     }
 
     fun stopAll() {
-        runtimes.keys.toList().forEach { stop(it) }
+        RustProcessHost.nativeStopAll()
+        runtimes.values.forEach {
+            it.stopping = true
+            it.running = false
+        }
+        maybeStopService()
     }
 
     fun clearLog(id: String) {
-        runtimes[id]?.log = ""
+        RustProcessHost.nativeClearLog(id)
     }
 
-    private fun launch(config: HostedProcess, runtime: HostRuntime) {
-        runtime.running = true
-        runtime.startedAt = System.currentTimeMillis()
-        val thread = Thread {
-            try {
-                val process = ProcessLauncher.create(
-                    application!!,
-                    config.command,
-                    config.linux,
-                    config.workDir,
-                    config.id
-                )
-                runtime.process = process
-                append(runtime, "▶ ${config.name}\n")
-                val reader = BufferedReader(InputStreamReader(process.inputStream))
-                val buffer = CharArray(4096)
-                while (true) {
-                    val read = reader.read(buffer)
-                    if (read <= 0) break
-                    append(runtime, String(buffer, 0, read))
-                }
-                val exit = process.waitFor()
-                runtime.process = null
-                runtime.running = false
-                append(runtime, "\n■ Процесс завершён, код $exit\n")
-                if (!runtime.stopping && config.keepAlive && runtime.restarts < MAX_RESTARTS) {
-                    runtime.restarts++
-                    append(runtime, "↻ Перезапуск через 3 секунды (${runtime.restarts}/$MAX_RESTARTS)\n")
-                    Thread.sleep(3000)
-                    if (!runtime.stopping) launch(config, runtime)
-                } else {
-                    maybeStopService()
-                }
-            } catch (e: Exception) {
-                runtime.running = false
-                runtime.process = null
-                append(runtime, "✖ ${e.message ?: e.javaClass.simpleName}\n")
-                maybeStopService()
+    fun log(id: String): String = if (RustProcessHost.available) {
+        runCatching { RustProcessHost.nativeLog(id) }.getOrDefault("")
+    } else ""
+
+    private data class RustState(
+        val id: String,
+        val running: Boolean,
+        val restarting: Boolean,
+        val startedAt: Long,
+        val exitCode: Int,
+        val restarts: Int
+    )
+
+    private fun ensurePoller() {
+        if (poller?.isAlive == true) return
+        poller = Thread {
+            while (true) {
+                val states = snapshot()
+                mainHandler.post { applySnapshot(states) }
+                if (states.none { it.running || it.restarting }) break
+                Thread.sleep(POLL_INTERVAL_MS)
             }
+            poller = null
         }.apply {
             isDaemon = true
-            name = "MakTerm-host-${config.id}"
+            name = "MakTerm-rust-poll"
             start()
         }
-        threads[config.id] = thread
     }
 
-    private fun append(runtime: HostRuntime, text: String) {
-        val combined = runtime.log + text
-        runtime.log = if (combined.length > MAX_LOG) combined.takeLast(MAX_LOG) else combined
+    private fun snapshot(): List<RustState> {
+        if (!RustProcessHost.available) return emptyList()
+        val raw = runCatching { RustProcessHost.nativeSnapshot() }.getOrDefault("[]")
+        return try {
+            val array = JSONArray(raw)
+            (0 until array.length()).map { index ->
+                val item = array.getJSONObject(index)
+                RustState(
+                    id = item.optString("id"),
+                    running = item.optBoolean("running"),
+                    restarting = item.optBoolean("restarting"),
+                    startedAt = item.optLong("startedAt"),
+                    exitCode = item.optInt("exitCode", -999),
+                    restarts = item.optInt("restarts")
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun applySnapshot(states: List<RustState>) {
+        val byId = states.associateBy { it.id }
+        var changed = false
+        runtimes.forEach { (id, runtime) ->
+            val state = byId[id] ?: return@forEach
+            if (runtime.running != state.running) changed = true
+            runtime.running = state.running
+            runtime.startedAt = state.startedAt
+            runtime.restarts = state.restarts
+            runtime.exitCode = state.exitCode.takeIf { it != -999 }
+            if (state.running) runtime.stopping = false
+        }
+        if (changed) HostService.refresh(application!!)
+        if (states.none { it.running || it.restarting }) maybeStopService()
     }
 
     private fun maybeStopService() {
@@ -201,7 +229,6 @@ object HostedProcessManager {
         if (FileServer.running) return
         runCatching { HostService.stop(application!!) }
     }
-
 }
 
 /**

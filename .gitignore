@@ -20,3 +20,6 @@ Todo.md
 **/build
 .vscode
 core/wasm3
+
+# Rust build output
+core/rust/target/
